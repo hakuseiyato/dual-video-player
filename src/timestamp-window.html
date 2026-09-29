@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>タイムスタンプ</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    :root { --bg0:#0a0a14; --bg1:#12122a; --bg2:#1a1a3e; --bg3:#252550; --accent:#6c5ce7; --accent2:#a29bfe; --text:#e8e8f0; --dim:#8888aa; --dim2:#555577; --border:#2a2a4a; --green:#00b894; --yellow:#fdcb6e; }
+    body { font-family:'Segoe UI',sans-serif; background:var(--bg0); color:var(--text); height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+    .toolbar { display:flex; gap:4px; padding:6px 8px; background:var(--bg1); border-bottom:1px solid var(--border); flex-wrap:wrap; }
+    .toolbar button { background:var(--bg2); border:1px solid var(--border); color:var(--text); padding:4px 10px; border-radius:4px; cursor:pointer; font-size:10px; }
+    .toolbar button:hover { background:var(--bg3); border-color:var(--accent); }
+    .toolbar button.primary { background:var(--accent); border-color:var(--accent2); }
+    .toolbar .sep { width:1px; background:var(--border); margin:0 2px; }
+    .list { flex:1; overflow-y:auto; padding:6px; }
+    .ts-item { display:flex; align-items:flex-start; gap:8px; padding:8px; margin-bottom:4px; background:var(--bg1); border-radius:5px; border:1px solid var(--border); cursor:pointer; transition:border-color .15s; }
+    .ts-item:hover { border-color:var(--accent); }
+    .ts-thumb { width:80px; height:45px; border-radius:3px; background:var(--bg2); object-fit:cover; flex-shrink:0; }
+    .ts-thumb.empty { display:flex; align-items:center; justify-content:center; font-size:9px; color:var(--dim2); }
+    .ts-info { flex:1; min-width:0; }
+    .ts-tc { font-family:'Consolas','SF Mono',monospace; font-size:13px; font-weight:600; color:var(--green); margin-bottom:2px; }
+    .ts-note-input { width:100%; background:transparent; border:none; border-bottom:1px solid var(--border); color:var(--dim); font-size:11px; padding:2px 0; outline:none; }
+    .ts-note-input:focus { border-color:var(--accent); }
+    .ts-del { background:none; border:none; color:var(--dim2); cursor:pointer; font-size:14px; padding:2px 6px; opacity:0; transition:opacity .15s; align-self:flex-start; }
+    .ts-item:hover .ts-del { opacity:1; }
+    .empty-msg { text-align:center; padding:40px 20px; color:var(--dim2); font-size:12px; }
+    .count-bar { padding:4px 10px; background:var(--bg1); border-top:1px solid var(--border); font-size:10px; color:var(--dim2); display:flex; justify-content:space-between; }
+    .toast { position:fixed; bottom:40px; left:50%; transform:translateX(-50%); background:var(--accent); color:#fff; padding:6px 16px; border-radius:16px; font-size:11px; opacity:0; transition:opacity .3s; pointer-events:none; z-index:999; }
+    .toast.vis { opacity:1; }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <button class="primary" id="btnAdd">+ TS</button>
+    <button id="btnAddSS">+ TS+SS</button>
+    <div class="sep"></div>
+    <button id="btnCopy" title="クリップボードにコピー (HTML+テキスト)">コピー</button>
+    <button id="btnExportCSV">CSV</button>
+    <button id="btnExportTSV">TSV</button>
+  </div>
+  <div class="list" id="list">
+    <div class="empty-msg" id="emptyMsg">タイムスタンプなし<br>Ctrl+T で追加</div>
+  </div>
+  <div class="count-bar">
+    <span id="countLabel">0 件</span>
+    <span>クリックでシーク</span>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script>
+    const list = document.getElementById('list');
+    const emptyMsg = document.getElementById('emptyMsg');
+    const countLabel = document.getElementById('countLabel');
+    const toastEl = document.getElementById('toast');
+    let timestamps = [];
+    let toastTimer = null;
+
+    function toast(msg) {
+      toastEl.textContent = msg;
+      toastEl.classList.add('vis');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toastEl.classList.remove('vis'), 2000);
+    }
+
+    function render() {
+      list.innerHTML = '';
+      if (timestamps.length === 0) {
+        list.appendChild(emptyMsg);
+        emptyMsg.style.display = 'block';
+      } else {
+        emptyMsg.style.display = 'none';
+        timestamps.forEach((ts, i) => {
+          const div = document.createElement('div');
+          div.className = 'ts-item';
+
+          let thumbHtml;
+          if (ts.thumbnail) {
+            thumbHtml = `<img class="ts-thumb" src="${ts.thumbnail}" alt="SS">`;
+          } else {
+            thumbHtml = `<div class="ts-thumb empty">No SS</div>`;
+          }
+
+          div.innerHTML = `
+            ${thumbHtml}
+            <div class="ts-info">
+              <div class="ts-tc">${ts.tc}</div>
+              <input class="ts-note-input" placeholder="メモ...">
+            </div>
+            <button class="ts-del" title="削除">&times;</button>
+          `;
+
+          // Click thumbnail/TC to seek
+          div.querySelector('.ts-tc').addEventListener('click', () => {
+            window.electronAPI.sendTimestampSeek(ts.seconds);
+          });
+          if (ts.thumbnail) {
+            div.querySelector('.ts-thumb').addEventListener('click', () => {
+              window.electronAPI.sendTimestampSeek(ts.seconds);
+            });
+          }
+
+          // Note changes → sync back to main
+          div.querySelector('.ts-note-input').value = ts.note || '';
+          div.querySelector('.ts-note-input').addEventListener('change', (e) => {
+            timestamps[i].note = e.target.value;
+            window.electronAPI.sendTimestampNoteUpdate({ index: i, note: e.target.value });
+          });
+
+          // Delete → sync back to main
+          div.querySelector('.ts-del').addEventListener('click', (e) => {
+            e.stopPropagation();
+            window.electronAPI.sendTimestampDelete(i);
+            // Don't locally splice — wait for main to sync back
+          });
+
+          list.appendChild(div);
+        });
+      }
+      countLabel.textContent = `${timestamps.length} 件`;
+    }
+
+    // Copy timestamps (with HTML thumbnails)
+    function copyTimestamps() {
+      if (!timestamps.length) { toast('タイムスタンプがありません'); return; }
+      const textLines = timestamps.map(ts => `${ts.tc}${ts.note ? '\t' + ts.note : ''}`);
+      const plainText = textLines.join('\n');
+
+      try {
+        let html = '<table style="border-collapse:collapse;font-family:monospace;font-size:12px;">';
+        html += '<tr><th>SS</th><th>Timecode</th><th>Seconds</th><th>Note</th></tr>';
+        for (const ts of timestamps) {
+          html += '<tr>';
+          if (ts.thumbnail) {
+            html += `<td><img src="${ts.thumbnail}" width="80" height="45" style="object-fit:cover;"></td>`;
+          } else {
+            html += '<td>--</td>';
+          }
+          html += `<td>${ts.tc}</td><td>${ts.seconds.toFixed(3)}</td><td>${ts.note || ''}</td>`;
+          html += '</tr>';
+        }
+        html += '</table>';
+
+        const blob = new Blob([html], { type: 'text/html' });
+        const textBlob = new Blob([plainText], { type: 'text/plain' });
+        navigator.clipboard.write([
+          new ClipboardItem({ 'text/html': blob, 'text/plain': textBlob })
+        ]).then(() => toast('コピー完了 (HTML+テキスト)'));
+      } catch (e) {
+        navigator.clipboard.writeText(plainText).then(() => toast('コピー完了'));
+      }
+    }
+
+    // Export via main process
+    function exportTimestamps(format) {
+      if (!timestamps.length) { toast('タイムスタンプがありません'); return; }
+      // Send to main process to handle export through the main renderer
+      window.electronAPI.sendTimestampExportFromPopup(format);
+    }
+
+    // Receive data from main window
+    window.electronAPI.onTimestampData((data) => {
+      timestamps = data || [];
+      render();
+    });
+
+    document.getElementById('btnAdd').addEventListener('click', () => {
+      window.electronAPI.sendTimestampPopupAdd();
+    });
+    document.getElementById('btnAddSS').addEventListener('click', () => {
+      window.electronAPI.sendTimestampPopupAddSS();
+    });
+    document.getElementById('btnCopy').addEventListener('click', copyTimestamps);
+    document.getElementById('btnExportCSV').addEventListener('click', () => exportTimestamps('csv'));
+    document.getElementById('btnExportTSV').addEventListener('click', () => exportTimestamps('tsv'));
+
+    render();
+  </script>
+</body>
+</html>

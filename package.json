@@ -1,0 +1,40 @@
+{
+  "name": "dual-video-player",
+  "version": "1.0.0",
+  "description": "Dual Video Player for Virtual Production",
+  "main": "src/main.js",
+  "author": "VP Studio",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win portable --x64",
+    "build:dir": "electron-builder --win dir --x64"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.0.0"
+  },
+  "build": {
+    "appId": "com.vp.dual-video-player",
+    "productName": "DualVideoPlayer",
+    "files": [
+      "src/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": null,
+      "signAndEditExecutable": false
+    },
+    "portable": {
+      "artifactName": "DualVideoPlayer.exe"
+    }
+  }
+}

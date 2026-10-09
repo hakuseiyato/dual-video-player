@@ -570,9 +570,11 @@ function createWindow() {
   loadSettings();
   mainWindow = new BrowserWindow({
     width: 1600, height: 950, minWidth: 1000, minHeight: 600,
-    backgroundColor: '#0a0a14', title: 'Dual Video Player',
+    backgroundColor: '#0a0a14', title: `Dual Video Player ${app.getVersion()}`,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, webSecurity: false }
   });
+  // index.html の <title> で上書きされないよう、バージョン付きのタイトルを維持する（新旧ビルドの見分け用）
+  mainWindow.on('page-title-updated', (event) => event.preventDefault());
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
   buildMenu();
 
